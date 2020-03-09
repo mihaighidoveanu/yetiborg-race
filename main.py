@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 # coding: Latin-1
 
+from __future__ import division
 # Load library functions we want
 import time
 import os
@@ -11,7 +12,8 @@ import threading
 import picamera
 import picamera.array
 import cv2
-import numpy
+import numpy as np
+import math
 
 # Re-direct our output to standard error, we need to ignore standard out to hide some nasty print statements from pygame
 sys.stdout = sys.stderr
@@ -72,6 +74,40 @@ if voltageOut > voltageIn:
 else:
     maxPower = voltageOut / float(voltageIn)
 
+def transform_to_topdown_coordinates(img, pixels_per_centimer):
+    src = np.float32([[113-20, 36], [242-20, 40], [11-20, 120], [334-20, 122]])
+
+    output_w = int(100 * pixels_per_centimer)
+    output_h = int(100 * pixels_per_centimer)
+    paper_width = 21
+    paper_height = 29.7
+    paper_distance = 15
+
+    left_x = output_w / 2 - paper_width / 2 * pixels_per_centimer
+    right_x = output_w / 2 + paper_width / 2 * pixels_per_centimer
+    bottom_y = paper_distance * pixels_per_centimer
+    top_y = (paper_distance + paper_height) * pixels_per_centimer
+
+    dst = np.float32([[left_x, top_y], [right_x, top_y], [left_x, bottom_y], [right_x, bottom_y]])
+    M = cv2.getPerspectiveTransform(src, dst)
+    return cv2.warpPerspective(img, M, (output_w, output_h), flags=cv2.INTER_LINEAR)
+
+def orange_line_mask(hsvimg):
+    avg_saturation = np.mean(hsvimg[:,:,1])
+    lower_range1 = np.array([0,         3*avg_saturation, 35/100*255])
+    upper_range1 = np.array([50/360*180,       255, 80/100*255])
+    lower_range2 = np.array([340/360*180, 3*avg_saturation, 35/100*255])
+    upper_range2 = np.array([180,               255, 80/100*255])
+    color_mask1 = cv2.inRange(hsvimg, lower_range1, upper_range1)
+    color_mask2 = cv2.inRange(hsvimg, lower_range2, upper_range2)
+    return (color_mask1 > 0) | (color_mask2 > 0)
+
+def white_line_mask(hsvimg):
+    lower_range = np.array([0,   0,          60/100*255])
+    upper_range = np.array([255, 10/100*255, 255])
+    color_mask = cv2.inRange(hsvimg, lower_range, upper_range)
+    return color_mask > 0
+
 # Image stream processing thread
 class StreamProcessor(threading.Thread):
     def __init__(self):
@@ -100,30 +136,72 @@ class StreamProcessor(threading.Thread):
                     self.event.clear()
 
     # Image processing function
-    def ProcessImage(self, image):
+    def ProcessImage(self, img):
         # Flip the image if needed
-        if flippedImage:
-            image = cv2.flip(image, -1)
+        img = cv2.flip(img, -1)
 
         # if time.time() - self.last_photo_taken > 5:
         #     self.last_photo_taken = time.time()
-        filename = "photos/" + str(time.time()) + ".png"
-        cv2.imwrite(filename, image)
+        pixels_per_centimeter = 2.0
 
         # process image and get required imageData 
-        #TODO 
         # replace next line with required code
-        imageData = image
+        # img = cv2.flip(img, 1)
+        topdown = transform_to_topdown_coordinates(img, pixels_per_centimeter)
+        # topdown = img
 
-        self.move(imageData)
+        kernel_size = 3
+        blur = cv2.GaussianBlur(topdown, (kernel_size, kernel_size), 2)
+
+        hsvblur = cv2.cvtColor(blur, cv2.COLOR_BGR2HSV)
+        avg_saturation = np.mean(hsvblur[:,:,1])
+        orange_line = orange_line_mask(hsvblur)
+        # orange_line = np.zeros( (200, 200) , dtype = bool)
+        # orange_line[:][:10] = True
+        if not orange_line.any():
+            print 'No Orange detected!'
+
+        blur[orange_line] = (255, 0, 255)
+        filename = "photos/" + str(time.time()) + ".png"
+        cv2.imwrite(filename, blur)
+
+        self.move(orange_line, blur)
+
 
     # Set the motor speed from the motion detection
-    def move(self, imageData):
+    def move(self, orange_line, blur):
         global ZB
-        # TODO
-        # Set the motors with the required params based on imageData
-        driveRight = 1.0
-        driveLeft = 1.0
+
+        if not orange_line.any():
+            print 'No Orange! Just left'
+            driveLeft = .75
+            driveRight = 1.0
+        else:
+            # get average orange point
+            summ = np.array([0,0]);
+            count = 0.0
+            for i in range(len(orange_line)):
+                for j in range(len(orange_line[i])):
+                    if orange_line[i,j]==True:
+                        summ[0]+=i
+                        summ[1]+=j
+                        count += 1.0
+            summ = (summ / count)
+            # reference point
+            point = np.array([summ[0], summ[1]-len(blur)/2.0])
+            angle = math.atan2(point[0],point[1]) #angle in radians 
+            print 'Angle ', angle
+            # Set the motors with the required params based on imageData
+            beta = abs(math.pi / 2 - angle) / (math.pi / 2)
+            if angle <= math.pi / 2:
+                print 'Beta ', beta, ' to the right'
+                driveRight = 1 - beta
+                driveLeft = 1.0
+            else:
+                print 'Beta ', beta, ' to the left'
+                driveLeft = 1 - beta
+                driveRight = 1.0
+
         ZB.SetMotor1(-driveRight * maxPower) # Rear right
         ZB.SetMotor2(-driveRight * maxPower) # Front right
         ZB.SetMotor3(-driveLeft  * maxPower) # Front left
