@@ -150,6 +150,7 @@ class StreamProcessor(threading.Thread):
         topdown = transform_to_topdown_coordinates(img, pixels_per_centimeter)
         # topdown = img
 
+        topdown = topdown[50:150][:][:]
         kernel_size = 3
         blur = cv2.GaussianBlur(topdown, (kernel_size, kernel_size), 2)
 
@@ -172,27 +173,35 @@ class StreamProcessor(threading.Thread):
     def move(self, orange_line, blur):
         global ZB
 
-        if not orange_line.any():
+        scale = 1.7
+        th = 30
+        len_orange = len(np.argwhere(orange_line))
+        print('Orange pts ', len_orange)
+        if not orange_line.any() or len_orange <= th:
             print 'No Orange! Just left'
-            driveLeft = .75
+            driveLeft = .7
             driveRight = 1.0
         else:
             # get average orange point
             summ = np.array([0,0]);
             count = 0.0
-            for i in range(len(orange_line)):
-                for j in range(len(orange_line[i])):
-                    if orange_line[i,j]==True:
-                        summ[0]+=i
-                        summ[1]+=j
-                        count += 1.0
-            summ = (summ / count)
+            idx = np.argwhere(orange_line)
+            print 'Idx ', idx.shape
+            if len(idx) == 1:
+                y_avg = idx[0][0]
+                x_avg = idx[0][1]
+            else:
+                y_avg = np.mean(idx[:][0])
+                x_avg = np.mean(idx[:][1])
+            point = np.array([y_avg, x_avg])
+            point[1] = point[1] - len(blur) / 2.0
             # reference point
-            point = np.array([summ[0], summ[1]-len(blur)/2.0])
             angle = math.atan2(point[0],point[1]) #angle in radians 
+            print 'Point ', point
             print 'Angle ', angle
             # Set the motors with the required params based on imageData
             beta = abs(math.pi / 2 - angle) / (math.pi / 2)
+            beta  = beta * scale
             if angle <= math.pi / 2:
                 print 'Beta ', beta, ' to the right'
                 driveRight = 1 - beta

@@ -54,34 +54,34 @@ for photo in list(glob.glob("photos/*.png")):
     avg_saturation = np.mean(hsvblur[:,:,1])
     orange_line = orange_line_mask(hsvblur)
 
+    if not orange_line.any():
+        continue
     summ = np.array([0,0]);
     count = 0.0
     idx = np.argwhere(orange_line)
-    print(summ)
+    print(idx)
     y_avg = np.mean(idx[0][:])
     x_avg = np.mean(idx[1][:])
-    avgs = np.array([y_avg, x_avg])
+    point = np.array([y_avg, x_avg])
     # for i in range(len(orange_line)):
     #     for j in range(len(orange_line[i])):
     #         if orange_line[i,j]==True:
     #             summ[0]+=i
     #             summ[1]+=j
     #             count += 1.0
-    summ = (summ / count)  #2=pixelspercm
+    # summ = (summ / count)  #2=pixelspercm
     # print(blur.shape)
     # print(avg_point)
     # print(summ)
-    if not orange_line.any():
-        continue
-    point = np.array([summ[0], summ[1]])
-    print(point)
+    print('Point ', point)
     # point_idx = np.round(point).astype(int)
     # print(point_idx)
     # blur[point_idx[0] - 10 : point_idx[0] + 10][point_idx[1] - 10 : point_idx[1] + 10] = (0, 255, 255)
-    point = np.array([summ[0], summ[1]-len(blur)/2.0])
-    print(point)
+    point[1] = point[1] - len(blur) / 2.0
+    # point = np.array([summ[0], summ[1]-len(blur)/2.0])
+    print('Point ', point)
     angle = math.atan2(point[0],point[1]) #angle in radians 
-    print(angle)
+    print('Angle', angle)
 
 
     # print(orange_line)
